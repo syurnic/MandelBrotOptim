@@ -15,9 +15,28 @@ constexpr int HEIGHT = 960;
 constexpr int MAX_ITER = 255;
 constexpr float R_MIN = -2.0f, R_MAX = 0.5f;
 constexpr float I_MIN = -1.2f, I_MAX = 1.2f;
-constexpr int N_PALETTE = 1;
-constexpr int S = 2;
 constexpr bool AVX512MODE = false;
+
+static const sf::Color palette[] = {
+    {66, 30, 15, 255},   // Dark Brown
+    {25, 7, 26, 255},    // Dark Purple
+    {9, 1, 47,255},     // Deep Blue
+    {4, 4, 73,255},     // Navy
+    {0, 7, 100,255},    // Blue
+    {12, 44, 138,255},  // Light Blue
+    {24, 82, 177, 255},  // Sky Blue
+    {57, 125, 209,255}, // Pale Blue
+    {134, 181, 229,255},// White-Blue
+    {211, 236, 248,255},// Almost White
+    {241, 233, 191, 255},// Warm White
+    {248, 201, 95,255}, // Sand
+    {255, 170, 0,255},  // Gold
+    {204, 128, 0,255},  // Orange
+    {153, 87, 0,255},   // Rust
+    {106, 52, 3,255}    // Brown
+};
+
+//static const auto palette_casted = reinterpret_cast<const uint32_t*>(palette);
 
 inline int calculate_pixel(float cr, float ci) {
     float zr = 0.0f, zi = 0.0f;
@@ -32,28 +51,8 @@ inline int calculate_pixel(float cr, float ci) {
     return MAX_ITER;
 }
 
-sf::Color get_color(int n) {
-    if (n == MAX_ITER) return sf::Color::Black;
-
-    static const sf::Color palette[] = {
-        {66, 30, 15},   // Dark Brown
-        {25, 7, 26},    // Dark Purple
-        {9, 1, 47},     // Deep Blue
-        {4, 4, 73},     // Navy
-        {0, 7, 100},    // Blue
-        {12, 44, 138},  // Light Blue
-        {24, 82, 177},  // Sky Blue
-        {57, 125, 209}, // Pale Blue
-        {134, 181, 229},// White-Blue
-        {211, 236, 248},// Almost White
-        {241, 233, 191},// Warm White
-        {248, 201, 95}, // Sand
-        {255, 170, 0},  // Gold
-        {204, 128, 0},  // Orange
-        {153, 87, 0},   // Rust
-        {106, 52, 3}    // Brown
-    };
-
+inline sf::Color get_color(int n) {
+    //if (n == MAX_ITER) return sf::Color::Black;
     return palette[n % 16];
 }
 void render_avx512(uint8_t* pixels) {
@@ -81,8 +80,10 @@ void render_avx512(uint8_t* pixels) {
 
             __m512i iterations = _mm512_setzero_si512();
             __m512 four = _mm512_set1_ps(4.0f);
+            //__m512 one = _mm512_set1_ps(1.0f);
+            //__m512i four_int = _mm512_set1_epi32(4);
 
-            // Start with all lanes active
+
             __mmask16 active_mask = 0xFFFF;
 
             for (int i = 0; i < MAX_ITER; ++i) {
@@ -106,6 +107,7 @@ void render_avx512(uint8_t* pixels) {
                 zr = _mm512_add_ps(_mm512_sub_ps(current_zr2, current_zi2), cr);
                 zi = next_zi;
             }
+            int idx = 4 * (HEIGHT * y + x);
 
             int32_t counts[16];
             float store_zr2[16], store_zi2[16];
@@ -113,6 +115,7 @@ void render_avx512(uint8_t* pixels) {
             _mm512_storeu_ps(store_zi2, final_zi2); // Use the fixed final variables
             _mm512_storeu_ps(store_zr2, final_zr2);
 
+            //AVX512 calculate 16 float so this calculation is looped 16. But i'll fix it to avx instruction
             for (int i = 0; i < 16; ++i) {
                 int idx = (y * WIDTH + (x + i)) * 4;
                 int n = counts[i];
@@ -135,6 +138,32 @@ void render_avx512(uint8_t* pixels) {
                 }
                 pixels[idx+3] = 255;
             }
+            // __m512i WIDTH_vec = _mm512_set1_epi32(y * static_cast<int>(WIDTH));
+            // __m512i x_vec = _mm512_add_epi32(_mm512_set1_epi32(x), _mm512_set_epi32(
+            //                                      0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15));
+            //__m512i idx_vec = _mm512_mul_epi32(_mm512_add_epi32(WIDTH_vec, x_vec),four_int);
+            //__m512i count_vec = _mm512_load_si512((__m512i*)counts);
+            //__m512i idx_vec_mod16 = _mm512_and_si512(idx_vec, _mm512_set1_epi32(16));
+            // __m512 mag_vec = _mm512_add_ps(final_zr2, final_zi2);
+            // __mmask16 mag_mask = _mm512_cmp_ps_mask(mag_vec, one, _CMP_LT_OQ);
+            // __m512 one_p_eps = _mm512_set1_ps(1.0001f);
+            // _mm512_mask_mov_ps(mag_vec,mag_mask,one_p_eps);
+            // alignas(64) float magnitude[16];
+            // alignas(64) float smooth_n[16];
+            // alignas(64) float frac[16];
+            // _mm512_store_ps(magnitude, mag_vec);
+            // for (int i = 0; i < 16; ++i) {
+            //     smooth_n[i] = static_cast<float>(counts[i]) + 1.f - std::log2f(0.5f * std::log2f(magnitude[i]));
+            //     frac[i] = smooth_n[i] - std::floor(smooth_n[i]);
+            // }
+            // __m512i smooth_n_vec = _mm512_and_si512(_mm512_load_si512(smooth_n), _mm512_set1_epi32(16));
+            //__m512i smooth_n_vec_plus1 = _mm512_and_epi32(_mm512_add_epi32(smooth_n_vec, _mm512_set1_epi32(1)), _mm512_set1_epi32(16));
+            // __mmask64 always255mask = 0x1111111111111111ULL;
+            // __m512i color_result = _mm512_i32gather_epi32(smooth_n_vec,palette_casted,4);
+            //__m512i plus1_color_result = _mm512_i32gather_epi32(smooth_n_vec_plus1,palette_casted,4);
+            // alignas(64) uint8_t tile_pixels[64];
+            // _mm512_storeu_si512(reinterpret_cast<__m512i*>(tile_pixels), color_result);
+            // std::memcpy(pixels + idx,tile_pixels,64);
         }
     }
 }
@@ -143,7 +172,7 @@ int main() {
     omp_set_num_threads(std::thread::hardware_concurrency() / 2);
     std::vector<uint8_t> pixels(WIDTH * HEIGHT * 4);
 
-    //To measure long-term performance instead of short-term performance.
+    //To measure long-term performance instead of short-term spike performance.
     std::cout << "Warming up CPU..." << std::endl;
     for (int i = 0; i < 5; ++i) {
         render_avx512(pixels.data());
@@ -198,7 +227,7 @@ int main() {
     }
     return 0;
 }
-//benchmarked with no power supply. Test spec
+//benchmarked with no power supply on laptop. Test spec
 //Lenovo Ideapad slim 5(16inch, amd gen 10)
 //RYZEN AI 7 350(laptop)
 //DDR5 32GB 5600MT
@@ -207,12 +236,11 @@ int main() {
 //226FPS(AVX-512)
 //#pragma omp parallel for schedule(guided) thread imbalance is high. (gomp_team_barrier_wait_end 17.2% on prof)
 //changed to schedule(dynamic, n)
-//n = 4: 293FPS | 290FPS (gomp_team_barrier_wait_end dropped below 1%)
+//n = 4: 293FPS | 290FPS (gomp_team_barrier_wait_end dropped below 1%). 339FPS when powered on
 //n = 1: 297FPS | 291FPS | 298FPS
 //n = 16: 293FPS | 280FPS | 294FPS
 //n = 64: 240FPS | 236FPS | 229FPS | 232FPS
 //conclusion: n = 1 ~ 16 irrelevent. I'll use n = 4;
 
-//no what's the problem?
 //AVX512_render consume 60%. Gemini says I can raise it to over 85%.
 //changing coloring to AVX512 later.
